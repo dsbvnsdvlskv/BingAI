@@ -1,4 +1,5 @@
 name: Build Go-Proxy-BingAI
+
 on:
   push:
     tags:
@@ -6,52 +7,60 @@ on:
 
 jobs:
   build:
-    name: build
+    name: Build and Release
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v3
+      - name: Checkout Repository
+        uses: actions/checkout@v3
 
       - name: Set up Go
         uses: actions/setup-go@v4
+        with:
+          go-version: stable
+          cache: true
 
       - name: Set up Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: 18.17.0
+          node-version: 18
+          cache: 'npm'
 
       - name: Build Frontend
         run: |
-          rm -r web/* && git checkout web/web.go
+          git checkout -- web/web.go  # Reset instead of removing all files
           cd frontend
-          npm install
+          npm ci
           npm run build
           cd ..
 
-      - name: Commit latest webFile
+      - name: Commit Latest Web Files (if changed)
         run: |
           git config --global user.email "zklcdc@qq.com"
           git config --global user.name "Harry-zklcdc"
           git add web/*
-          git commit -m "[Upgrade] 🚀 Upload latest webFile"
-          git push origin HEAD:master
+          if ! git diff --cached --quiet; then
+            git commit -m "[Upgrade] 🚀 Upload latest webFile"
+            git push origin HEAD:master
+          fi
 
-      - name: Build binary
+      - name: Build Binaries
         run: |
-          GOOS=linux GOARCH=amd64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai main.go && tar -zcvf go-proxy-bingai-linux-amd64.tar.gz go-proxy-bingai
-          GOOS=linux GOARCH=arm64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai main.go && tar -zcvf go-proxy-bingai-linux-arm64.tar.gz go-proxy-bingai
-          GOOS=windows GOARCH=amd64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai.exe main.go && tar -zcvf go-proxy-bingai-windows-amd64.tar.gz go-proxy-bingai.exe
-          GOOS=windows GOARCH=arm64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai.exe main.go && tar -zcvf go-proxy-bingai-windows-arm64.tar.gz go-proxy-bingai.exe
-          GOOS=darwin GOARCH=amd64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai main.go && tar -zcvf go-proxy-bingai-darwin-amd64.tar.gz go-proxy-bingai
-          GOOS=darwin GOARCH=arm64 go build -ldflags="-s -w" -tags netgo -trimpath -o go-proxy-bingai main.go && tar -zcvf go-proxy-bingai-darwin-arm64.tar.gz go-proxy-bingai
+          PLATFORMS=("linux/amd64" "linux/arm64" "windows/amd64" "windows/arm64" "darwin/amd64" "darwin/arm64")
+          for PLATFORM in "${PLATFORMS[@]}"; do
+            OS=${PLATFORM%/*}
+            ARCH=${PLATFORM#*/}
+            EXT=""
+            [[ "$OS" == "windows" ]] && EXT=".exe"
+            OUTPUT="go-proxy-bingai${EXT}"
+            TAR_FILE="go-proxy-bingai-${OS}-${ARCH}.tar.gz"
+            env GOOS=$OS GOARCH=$ARCH go build -ldflags="-s -w" -tags netgo -trimpath -o $OUTPUT main.go
+            tar -zcvf $TAR_FILE $OUTPUT
+          done
 
-      - name: Create Release and Upload Release Asset
+      - name: Create Release and Upload Assets
         uses: softprops/action-gh-release@v1
         with:
-          files: |
-            go-proxy-bingai-linux-amd64.tar.gz
-            go-proxy-bingai-linux-arm64.tar.gz
-            go-proxy-bingai-windows-amd64.tar.gz
-            go-proxy-bingai-windows-arm64.tar.gz
-            go-proxy-bingai-darwin-amd64.tar.gz
-            go-proxy-bingai-darwin-arm64.tar.gz
-  
+          files: go-proxy-bingai-*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
